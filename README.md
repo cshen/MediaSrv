@@ -70,7 +70,7 @@ cp config.example.toml config.toml
 [server]
 host = "0.0.0.0"
 port = 9000
-# data_dir = "~/MediaSrv-data"
+# data_dir = "~/.cache/MediaSrv/data"
 
 [media]
 audio = ["~/Music"]           # where your MP3s live
@@ -100,7 +100,7 @@ Relative media paths are resolved against the config file. Multiple roots in
 | `MEDIASRV_MEDIA` | from config | Folder(s) to scan. Separate with `:` or `,`. |
 | `MEDIASRV_HOST` | `0.0.0.0` | Bind address (all interfaces = reachable from iPad). |
 | `MEDIASRV_PORT` | `9000` | Port. |
-| `MEDIASRV_DATA` | `./data` | Where the library cache, covers and favorites live. |
+| `MEDIASRV_DATA` | `~/.cache/MediaSrv/data` | Where the library cache, covers, favorites and transcoded files live. |
 
 ## Video compatibility & transcoding
 

@@ -7,7 +7,7 @@
 [server]
 host = "0.0.0.0"     # 0.0.0.0 = reachable from your iPad on the LAN
 port = 9000
-# data_dir = "~/MediaSrv-data"   # where library cache / covers / favorites live
+# data_dir = "~/.cache/MediaSrv/data"   # library cache / covers / favorites / transcoded
 
 [media]
 # Folder roots to scan. "audio" and "video" are combined for scanning; the

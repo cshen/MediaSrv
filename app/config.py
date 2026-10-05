@@ -27,7 +27,7 @@ DEFAULTS: dict[str, Any] = {
     "server": {
         "host": "0.0.0.0",
         "port": 9000,
-        "data_dir": str(BASE_DIR / "data"),
+        "data_dir": str(Path.home() / ".cache" / "MediaSrv" / "data"),
     },
     "media": {
         # Folder roots. Audio/video are combined for scanning; the split is
