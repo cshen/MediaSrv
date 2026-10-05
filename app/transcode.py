@@ -3,11 +3,17 @@
 iPadOS Safari (and some other browsers) cannot play VP9/AV1 inside an MP4
 container. Files like that are converted on demand, in the background, to a
 web-safe MP4 kept in ``data/transcoded/``. The original file is never touched.
+
+Transcoding is *resumable*: the source is cut into fixed-length segments, each
+encoded to its own file. If the server stops part-way through, the finished
+segments are kept and only the remaining ones are encoded on the next run,
+followed by a fast stream-copy concat into the final MP4.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import subprocess
 import threading
@@ -82,7 +88,7 @@ def _has_encoder(name: str) -> bool:
 
 
 class Transcoder:
-    """Single-worker background transcoder with per-track status."""
+    """Single-worker background transcoder with per-track status and resume."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -90,8 +96,12 @@ class Transcoder:
         self._pending: list[dict] = []
         self._worker: threading.Thread | None = None
 
+    # ---------------------------------------------------------------- paths
     def output_path(self, tid: str) -> Path:
         return config.TRANSCODE_DIR / f"{tid}.mp4"
+
+    def _work_dir(self, tid: str) -> Path:
+        return config.TRANSCODE_DIR / tid
 
     def ready_path(self, track: dict) -> Path | None:
         """Return the transcoded file if present and newer than the source."""
@@ -106,6 +116,7 @@ class Transcoder:
             pass
         return out
 
+    # ---------------------------------------------------------------- status
     def status(self, tid: str) -> dict:
         if self.output_path(tid).exists():
             return {"state": "ready", "progress": 100}
@@ -113,6 +124,9 @@ class Transcoder:
             job = self._jobs.get(tid)
             if job:
                 return dict(job)
+        # Not this process's job, but partial segments may exist from before.
+        if self._work_dir(tid).exists():
+            return {"state": "idle", "progress": 0}
         return {"state": "idle", "progress": 0}
 
     def start(self, track: dict) -> dict:
@@ -147,75 +161,145 @@ class Transcoder:
             except Exception as exc:  # pragma: no cover - defensive
                 self._set(track["id"], state="error", error=str(exc))
 
+    # ---------------------------------------------------------------- worker
     def _run(self, track: dict) -> None:
         tid = track["id"]
         src = Path(track["path"])
         out = self.output_path(tid)
         out.parent.mkdir(parents=True, exist_ok=True)
-        tmp = out.with_suffix(".part.mp4")
+        tmp_out = out.parent / f"{out.stem}.part.mp4"
+
+        seg_dir = self._work_dir(tid)
+        seg_dir.mkdir(parents=True, exist_ok=True)
+
+        duration = float(track.get("duration") or 0.0)
+        seg_len = max(1, config.TRANSCODE_SEGMENT_SECONDS)
 
         self._set(tid, state="processing", progress=0, error=None)
-        duration = float(track.get("duration") or 0.0)
-        cmd = self._build_cmd(src, tmp)
+
+        # If the source changed, throw away any segments from a previous run.
         try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                bufsize=1,
-            )
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                line = line.strip()
-                if not line.startswith("out_time_"):
-                    continue
-                try:
-                    micros = int(line.split("=", 1)[1])
-                except ValueError:
-                    continue
-                if duration > 0:
-                    pct = max(0, min(99, int((micros / 1_000_000) / duration * 100)))
-                    self._set(tid, progress=pct)
-            proc.wait()
-            if proc.returncode != 0:
-                raise RuntimeError(f"ffmpeg failed (exit {proc.returncode})")
-            tmp.replace(out)
+            src_mtime = src.stat().st_mtime
+        except OSError:
+            src_mtime = 0.0
+        want_meta = {"path": str(src), "mtime": src_mtime, "segment": seg_len}
+        meta_file = seg_dir / "meta.json"
+        try:
+            existing_meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            existing_meta = None
+        if existing_meta != want_meta:
+            shutil.rmtree(seg_dir, ignore_errors=True)
+            seg_dir.mkdir(parents=True, exist_ok=True)
+            meta_file.write_text(json.dumps(want_meta), encoding="utf-8")
+
+        total = max(1, math.ceil(duration / seg_len)) if duration > 0 else None
+
+        try:
+            index = 0
+            while total is None or index < total:
+                if duration > 0 and index * seg_len >= duration:
+                    break
+                seg_final = seg_dir / f"seg-{index:05d}.mp4"
+                if not seg_final.exists():
+                    seg_part = seg_dir / f"seg-{index:05d}.part.mp4"
+                    start = index * seg_len
+
+                    def report(secs: float, i: int = index) -> None:
+                        frac = min(1.0, secs / seg_len) if seg_len else 0.0
+                        pct = int(((i + frac) / total) * 90) if total else 0
+                        self._set(tid, progress=max(0, min(89, pct)))
+
+                    self._exec(self._segment_cmd(src, seg_part, start, seg_len), report)
+                    seg_part.replace(seg_final)
+                index += 1
+                if total:
+                    self._set(tid, progress=min(90, int(index / total * 90)))
+            if total is None:
+                total = index
+
+            self._set(tid, progress=92)
+            self._exec(self._concat_cmd(seg_dir, tmp_out, total))
+            self._set(tid, progress=99)
+            tmp_out.replace(out)
+            shutil.rmtree(seg_dir, ignore_errors=True)
             self._set(tid, state="ready", progress=100, error=None)
         except Exception as exc:
             self._set(tid, state="error", error=str(exc))
             try:
-                tmp.unlink()
+                tmp_out.unlink()
             except OSError:
                 pass
 
-    def _build_cmd(self, src: Path, dst: Path) -> list[str]:
+    def _exec(self, cmd: list[str], on_progress=None) -> None:
         assert FFMPEG is not None
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            if on_progress is None or not line.startswith("out_time_"):
+                continue
+            try:
+                micros = int(line.split("=", 1)[1])
+            except ValueError:
+                continue
+            on_progress(micros / 1_000_000)
+        proc.wait()
+        if proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed (exit {proc.returncode})")
+
+    def _encoder_args(self) -> list[str]:
         encoder = config.TRANSCODE_ENCODER
         if encoder == "auto":
             encoder = "videotoolbox" if _has_encoder("h264_videotoolbox") else "libx264"
-
-        cmd = [
-            FFMPEG, "-y", "-v", "error",
-            "-i", str(src),
-            "-map", "0:v:0", "-map", "0:a:0?",
-        ]
         if encoder in ("videotoolbox", "h264_videotoolbox"):
-            cmd += ["-c:v", "h264_videotoolbox", "-b:v", config.TRANSCODE_VIDEO_BITRATE]
-        else:
-            cmd += [
-                "-c:v", "libx264",
-                "-crf", str(config.TRANSCODE_CRF),
-                "-preset", config.TRANSCODE_PRESET,
-            ]
+            return ["-c:v", "h264_videotoolbox", "-b:v", config.TRANSCODE_VIDEO_BITRATE]
+        return [
+            "-c:v", "libx264",
+            "-crf", str(config.TRANSCODE_CRF),
+            "-preset", config.TRANSCODE_PRESET,
+        ]
+
+    def _segment_cmd(self, src: Path, dst: Path, start: float, length: float) -> list[str]:
+        assert FFMPEG is not None
+        cmd = [FFMPEG, "-y", "-v", "error"]
+        if start > 0:
+            cmd += ["-ss", f"{start:.3f}"]
+        cmd += ["-i", str(src), "-t", f"{length:.3f}", "-map", "0:v:0", "-map", "0:a:0?"]
+        cmd += self._encoder_args()
         cmd += [
             "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", config.TRANSCODE_AUDIO_BITRATE,
-            "-movflags", "+faststart",
+            "-avoid_negative_ts", "make_zero",
             "-progress", "pipe:1", "-nostats",
             str(dst),
         ]
         return cmd
+
+    def _concat_cmd(self, seg_dir: Path, dst: Path, count: int) -> list[str]:
+        assert FFMPEG is not None
+        lines = []
+        for i in range(count):
+            name = f"seg-{i:05d}.mp4"
+            if not (seg_dir / name).exists():
+                raise RuntimeError(f"missing segment {name}")
+            lines.append(f"file '{name}'")
+        list_file = seg_dir / "concat.txt"
+        list_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return [
+            FFMPEG, "-y", "-v", "error",
+            "-f", "concat", "-safe", "0", "-i", str(list_file),
+            "-c", "copy",
+            "-movflags", "+faststart",
+            "-progress", "pipe:1", "-nostats",
+            str(dst),
+        ]
 
 
 transcoder = Transcoder()

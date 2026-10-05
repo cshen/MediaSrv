@@ -47,3 +47,7 @@ video_bitrate = "5M"    # used by the hardware (videotoolbox) encoder
 crf = 23                # used by libx264
 preset = "veryfast"     # used by libx264
 audio_bitrate = "160k"
+# Transcoding is resumable: the source is cut into segments of this many
+# seconds. Finished segments are kept if the server stops, so a restart only
+# re-encodes what's left. Smaller = finer resume, more files.
+segment_seconds = 30

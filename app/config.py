@@ -57,6 +57,7 @@ DEFAULTS: dict[str, Any] = {
         "crf": 23,  # used by libx264
         "preset": "veryfast",  # used by libx264
         "audio_bitrate": "160k",
+        "segment_seconds": 30,  # resume granularity (shorter = finer resume)
     },
 }
 
@@ -198,6 +199,7 @@ TRANSCODE_VIDEO_BITRATE = str(CONFIG["transcode"].get("video_bitrate", "5M"))
 TRANSCODE_CRF = int(CONFIG["transcode"].get("crf", 23))
 TRANSCODE_PRESET = str(CONFIG["transcode"].get("preset", "veryfast"))
 TRANSCODE_AUDIO_BITRATE = str(CONFIG["transcode"].get("audio_bitrate", "160k"))
+TRANSCODE_SEGMENT_SECONDS = max(1, int(CONFIG["transcode"].get("segment_seconds", 30)))
 
 
 def public() -> dict:

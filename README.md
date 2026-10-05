@@ -117,6 +117,9 @@ non-web-safe codec, transcodes it on demand to **H.264 + AAC (faststart)** in
   hardware encoder (`h264_videotoolbox`) and is usually much faster than
   real time.
 - The result is cached, so it only happens once per file.
+- **Resumable:** the source is transcoded in segments, so if the server is
+  stopped mid-way the finished segments are kept and only the rest is redone on
+  the next run (tune with `segment_seconds`).
 - Disable/tune it in `config.toml` under `[transcode]`.
 
 ## Connect from the iPad
