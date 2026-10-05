@@ -24,6 +24,7 @@ const state = {
   prep: {},
   watching: new Set(),
   scanning: false,
+  progress: { done: 0, total: 0 },
 };
 
 const els = {
@@ -115,7 +116,9 @@ function renderList() {
     video: "No videos found.",
   };
   els.empty.textContent = state.scanning
-    ? "Scanning your library…"
+    ? state.progress.total
+      ? `Scanning your library… ${state.progress.done}/${state.progress.total}`
+      : "Scanning your library…"
     : emptyText[state.view] || "Nothing here yet.";
 
   const frag = document.createDocumentFragment();
@@ -762,6 +765,7 @@ function applyLibrary(data) {
   state.byId = new Map(state.tracks.map((t) => [t.id, t]));
   state.favorites = new Set(state.tracks.filter((t) => t.favorite).map((t) => t.id));
   state.scanning = !!data.scanning;
+  state.progress = data.progress || { done: 0, total: 0 };
 }
 
 function pollLibrary() {

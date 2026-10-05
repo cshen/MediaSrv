@@ -39,11 +39,21 @@ class Library:
         self._by_id: dict[str, dict] = {}
         self._loaded = False
         self._scanning = False
+        self._progress: dict = {"done": 0, "total": 0}
 
     @property
     def scanning(self) -> bool:
         with self._lock:
             return self._scanning
+
+    @property
+    def progress(self) -> dict:
+        with self._lock:
+            return dict(self._progress)
+
+    def _on_progress(self, done: int, total: int, path) -> None:
+        with self._lock:
+            self._progress = {"done": done, "total": total}
 
     def ensure(self) -> None:
         """Kick off a background load/scan if not already loaded/running."""
@@ -51,13 +61,14 @@ class Library:
             if self._loaded or self._scanning:
                 return
             self._scanning = True
+            self._progress = {"done": 0, "total": 0}
         threading.Thread(target=self._load, daemon=True).start()
 
     def _load(self) -> None:
         try:
             tracks = scanner.load_cache()
             if tracks is None:
-                tracks = scanner.scan()
+                tracks = scanner.scan(progress=self._on_progress)
         except Exception:
             log.exception("library load failed")
             tracks = []
@@ -69,11 +80,12 @@ class Library:
             if self._scanning:
                 return
             self._scanning = True
+            self._progress = {"done": 0, "total": 0}
         threading.Thread(target=self._rescan, daemon=True).start()
 
     def _rescan(self) -> None:
         try:
-            tracks = scanner.scan()
+            tracks = scanner.scan(progress=self._on_progress)
         except Exception:
             log.exception("library rescan failed")
             with self._lock:
@@ -86,6 +98,7 @@ class Library:
             self._by_id = {t["id"]: t for t in tracks}
             self._loaded = True
             self._scanning = False
+            self._progress = {"done": len(tracks), "total": len(tracks)}
 
     def tracks(self) -> list[dict]:
         self.ensure()
@@ -144,7 +157,14 @@ def api_config() -> JSONResponse:
 def api_tracks() -> JSONResponse:
     fav = favorites.all_ids()
     tracks = [_public(t, fav) for t in library.tracks()]
-    return JSONResponse({"count": len(tracks), "tracks": tracks, "scanning": library.scanning})
+    return JSONResponse(
+        {
+            "count": len(tracks),
+            "tracks": tracks,
+            "scanning": library.scanning,
+            "progress": library.progress,
+        }
+    )
 
 
 @app.post("/api/rescan")

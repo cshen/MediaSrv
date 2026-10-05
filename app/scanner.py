@@ -146,66 +146,96 @@ def _scan_paths() -> set[str]:
     return found
 
 
-def scan() -> list[dict]:
-    """Walk the configured media roots and build the library list."""
-    config.ensure_dirs()
-    started = time.time()
-    tracks: list[dict] = []
+def _list_media() -> list[tuple[Path, str]]:
+    """List all playable files (path, kind) without reading their tags."""
+    found: list[tuple[Path, str]] = []
     seen: set[str] = set()
-    skipped = 0
-
     for root in config.media_dirs():
         if not root.exists():
             log.warning("media folder does not exist: %s", root)
             continue
         for path in _iter_files(root):
+            kind = _kind(path.suffix.lower())
+            if not kind:
+                continue
+            if not path.is_file():  # skip FIFOs/sockets/devices, which can block
+                continue
+            key = str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append((path, kind))
+    return found
+
+
+def scan(progress=None) -> list[dict]:
+    """Walk the configured media roots and build the library list.
+
+    ``progress`` is an optional callable ``(done, total, path)`` invoked after
+    each file, for UI/status reporting.
+    """
+    config.ensure_dirs()
+    started = time.time()
+    roots = ", ".join(str(p) for p in config.media_dirs())
+    log.info("scan: start (roots: %s)", roots)
+
+    media = _list_media()
+    total = len(media)
+    log.info("scan: %d media file(s) to inspect", total)
+
+    tracks: list[dict] = []
+    skipped = 0
+
+    for index, (path, kind) in enumerate(media, 1):
+        item_started = time.time()
+        try:
+            tid = track_id(path)
+            stat = path.stat()
+            meta, cover = _read_metadata(path, tid)
+
+            codec = ""
+            web_safe = True
+            if kind == "video":
+                codec = transcode.probe_codec(path) or ""
+                web_safe = transcode.is_web_safe(codec)
+
+            tracks.append(
+                {
+                    "id": tid,
+                    "title": meta["title"],
+                    "artist": meta["artist"],
+                    "album": meta["album"],
+                    "duration": meta["duration"],
+                    "type": kind,
+                    "ext": path.suffix.lower().lstrip("."),
+                    "codec": codec,
+                    "web_safe": web_safe,
+                    "size": stat.st_size,
+                    "mtime": stat.st_mtime,
+                    "has_cover": cover is not None,
+                    "path": str(path),
+                }
+            )
+        except Exception as exc:
+            skipped += 1
+            log.warning("skipping %s: %s", path, exc)
+
+        if progress is not None:
             try:
-                suffix = path.suffix.lower()
-                kind = _kind(suffix)
-                if not kind:
-                    continue
-                if not path.is_file():
-                    continue
+                progress(index, total, path)
+            except Exception:
+                pass
 
-                tid = track_id(path)
-                if tid in seen:
-                    continue
-                seen.add(tid)
-
-                stat = path.stat()
-                meta, cover = _read_metadata(path, tid)
-
-                codec = ""
-                web_safe = True
-                if kind == "video":
-                    codec = transcode.probe_codec(path) or ""
-                    web_safe = transcode.is_web_safe(codec)
-
-                tracks.append(
-                    {
-                        "id": tid,
-                        "title": meta["title"],
-                        "artist": meta["artist"],
-                        "album": meta["album"],
-                        "duration": meta["duration"],
-                        "type": kind,
-                        "ext": suffix.lstrip("."),
-                        "codec": codec,
-                        "web_safe": web_safe,
-                        "size": stat.st_size,
-                        "mtime": stat.st_mtime,
-                        "has_cover": cover is not None,
-                        "path": str(path),
-                    }
-                )
-            except Exception as exc:
-                skipped += 1
-                log.warning("skipping %s: %s", path, exc)
+        elapsed = time.time() - item_started
+        if elapsed > 5:
+            log.warning("slow file (%.1fs): %s", elapsed, path)
+        elif index % 50 == 0:
+            log.info("scan progress: %d/%d", index, total)
 
     tracks.sort(key=lambda t: (t["artist"].lower(), t["album"].lower(), t["title"].lower()))
     save_cache(tracks)
     log.info(
-        "scan done: %d tracks (%d skipped) in %.1fs",
+        "scan: done: %d tracks (%d skipped) in %.1fs",
         len(tracks),
         skipped,
         time.time() - started,
