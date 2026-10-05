@@ -1,0 +1,49 @@
+# MediaSrv configuration
+#
+# Copy this file to config.toml next to the code, or to
+# ~/.config/MediaSrv/config.toml, and edit as needed.
+# Environment variables (MEDIASRV_*) override anything set here.
+
+[server]
+host = "0.0.0.0"     # 0.0.0.0 = reachable from your iPad on the LAN
+port = 9000
+# data_dir = "~/MediaSrv-data"   # where library cache / covers / favorites live
+
+[media]
+# Folder roots to scan. "audio" and "video" are combined for scanning; the
+# split is just a convenient way to describe your library. "paths" holds extra
+# mixed folders. Relative paths are resolved against this config file.
+audio = ["~/Music"]
+video = ["~/Movies"]
+paths = []
+
+# Also descend into symbolic-linked folders.
+follow_symlinks = false
+
+# Skip dotfiles and dot-directories.
+ignore_hidden = true
+
+# Which file extensions count as playable.
+audio_extensions = [".mp3"]
+video_extensions = [".mp4", ".m4v", ".mov"]
+# Want more? e.g. audio_extensions = [".mp3", ".m4a", ".flac", ".aac"]
+
+[player]
+# Starting values for the web player (your in-browser changes are remembered
+# locally and take precedence).
+volume = 0.8          # 0.0 - 1.0
+shuffle = false
+repeat = "off"        # off | all | one
+skip_seconds = 10     # rewind / forward jump size
+theme = "dark"        # dark | light
+
+[transcode]
+# iPadOS Safari cannot play VP9/AV1 inside MP4. Videos whose codec is not
+# web-safe are transcoded on demand to H.264 + AAC (kept in data/transcoded/).
+# Requires ffmpeg/ffprobe on PATH.
+enabled = true
+encoder = "auto"        # auto | videotoolbox | libx264
+video_bitrate = "5M"    # used by the hardware (videotoolbox) encoder
+crf = 23                # used by libx264
+preset = "veryfast"     # used by libx264
+audio_bitrate = "160k"

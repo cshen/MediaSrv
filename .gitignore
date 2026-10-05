@@ -1,0 +1,13 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Local, machine-specific config (see config.example.toml)
+config.toml
+
+# Runtime data: library cache, covers, favorites, transcoded video
+data/

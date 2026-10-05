@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d0f14" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="My Media Hub" />
+  <title>My Media Hub</title>
+  <link rel="icon" href="/logo.png" />
+  <link rel="apple-touch-icon" href="/logo.png" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="backdrop" id="backdrop"></div>
+
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <img class="brand-logo" src="/logo.png" alt="" />
+        <span class="brand-name">My Media Hub</span>
+      </div>
+
+      <div class="tabs">
+        <button class="tab is-active" data-view="audio">Audio</button>
+        <button class="tab" data-view="video">Video</button>
+        <button class="tab" data-view="favorites">Favorites</button>
+      </div>
+
+      <div class="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4a6 6 0 1 0 3.86 10.6l3.77 3.77 1.4-1.4-3.77-3.78A6 6 0 0 0 10 4zm0 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"/></svg>
+        <input id="search" type="search" placeholder="Search title, artist, album" autocomplete="off" />
+      </div>
+
+      <button class="shuffle-btn" id="shuffleAll">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3h5v5h-2V6.41l-4.29 4.3-1.42-1.42L17.59 5H16V3zM3 5h4.17l3.29 3.3-1.41 1.4L6.17 7H3V5zm13 11h1.59l-2.3-2.3 1.42-1.4L20 15.59V13h2v7h-7v-2h2.59l-2.3-2.3 1.42-1.4L20 18.59V16zM3 17h3.17l11-11H21v2h-3.17l-11 11H3v-2z"/></svg>
+        <span>Shuffle all</span>
+      </button>
+
+      <div class="list-head" id="listHead">Library</div>
+      <ul class="playlist" id="playlist"></ul>
+      <div class="empty" id="empty" hidden>Nothing here yet.</div>
+      <div class="resizer" id="resizer" title="Drag to resize"></div>
+    </aside>
+
+    <main class="stage">
+      <button class="menu-btn" id="menuBtn" aria-label="Toggle library">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/></svg>
+      </button>
+
+      <div class="visual" id="visual">
+        <div class="art" id="art">
+          <div class="art-placeholder">◍</div>
+        </div>
+        <video id="video" class="video" playsinline webkit-playsinline hidden></video>
+        <div class="prep" id="prep" hidden>
+          <div class="prep-spinner"></div>
+          <div class="prep-text" id="prepText">Optimizing video…</div>
+        </div>
+      </div>
+
+      <section class="meta">
+        <h1 class="title" id="title">Nothing playing</h1>
+        <p class="subtitle" id="subtitle">Choose a track from the library</p>
+      </section>
+
+      <section class="controls">
+        <div class="seek">
+          <span class="time" id="cur">0:00</span>
+          <input id="seek" class="seek-range" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek" />
+          <span class="time" id="dur">0:00</span>
+        </div>
+
+        <div class="buttons">
+          <button class="icon" id="shuffle" title="Shuffle"><svg viewBox="0 0 24 24"><path d="M16 3h5v5h-2V6.41l-4.29 4.3-1.42-1.42L17.59 5H16V3zM3 5h4.17l3.29 3.3-1.41 1.4L6.17 7H3V5zm13 11h1.59l-2.3-2.3 1.42-1.4L20 15.59V13h2v7h-7v-2h2.59l-2.3-2.3 1.42-1.4L20 18.59V16zM3 17h3.17l11-11H21v2h-3.17l-11 11H3v-2z"/></svg></button>
+
+          <button class="icon" id="prev" title="Previous"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>
+
+          <button class="icon" id="back" title="Back 10s"><svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/><text x="12" y="16" font-size="8" text-anchor="middle" fill="currentColor" stroke="none" font-family="sans-serif">10</text></svg></button>
+
+          <button class="play" id="play" title="Play / Pause">
+            <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <svg id="pauseIcon" viewBox="0 0 24 24" style="display:none"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
+          </button>
+
+          <button class="icon" id="fwd" title="Forward 10s"><svg viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z"/><text x="12" y="16" font-size="8" text-anchor="middle" fill="currentColor" stroke="none" font-family="sans-serif">10</text></svg></button>
+
+          <button class="icon" id="next" title="Next"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 6v12l8.5-6z"/></svg></button>
+
+          <button class="icon" id="repeat" title="Repeat"><svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg></button>
+
+          <button class="icon fav-big" id="favBig" title="Favorite"><svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.8-8.4C.6 9.9 2 6.5 5.2 5.6 7 5.1 8.8 5.8 12 8.9c3.2-3.1 5-3.8 6.8-3.3C22 6.5 23.4 9.9 21.8 12.6 19.5 16.4 12 21 12 21z"/></svg></button>
+
+          <button class="icon video-only" id="pip" title="Picture in Picture" style="display:none">
+            <svg viewBox="0 0 24 24"><path d="M19 11h-8v6h8v-6zm4 8V5c0-1.1-.9-2-2-2H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 0H3V5h18v14z"/></svg>
+          </button>
+
+          <button class="icon video-only" id="fullscreen" title="Fullscreen" style="display:none">
+            <svg id="fsEnter" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+            <svg id="fsExit" viewBox="0 0 24 24" style="display:none"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>
+          </button>
+        </div>
+
+        <div class="volume">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
+          <input id="volume" type="range" min="0" max="100" value="100" />
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
