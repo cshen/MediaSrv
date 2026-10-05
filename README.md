@@ -149,8 +149,57 @@ curl -X POST http://<IP>:9000/api/rescan
 
 The library is cached in `~/.cache/MediaSrv/data/library.json` and refreshed
 automatically when a file changes. Scanning always runs in the background, so
-the server stays responsive; the web UI shows "Scanning your library…" and
+the server stays responsive; the web UI shows "Scanning your library… x/N" and
 fills in automatically when it finishes.
+
+## Troubleshooting
+
+### "Scanning your library…" forever / the scan hangs
+
+A directory that never answers a `readdir` (a stalled network/external volume,
+or a folder macOS protects for background daemons) used to hang the whole scan,
+so nothing was ever found.
+
+MediaSrv now guards against this:
+
+- **Per-directory timeout** — if listing a folder doesn't respond within
+  `directory_timeout` seconds it is logged and skipped, and the scan continues:
+  ```
+  WARNING mediasrv.scanner: scan: skipping frozen directory /Users/cs/Music/Music (no response in 10s)
+  ```
+  Because a blocked `readdir` can't be cancelled, each frozen folder costs up to
+  one timeout per scan (not forever).
+- **`exclude` patterns** — skip known-bad folders instantly. Each entry is a
+  glob matched against the full path and the folder/file name.
+
+```toml
+[media]
+# narrow to what you actually want ...
+audio = ["~/Music"]
+video = ["~/Movies/Infuse", "~/Movies/Living"]
+# ... and/or skip the problematic folders
+exclude = ["*/Music/Music", "*/Movies/TV"]
+directory_timeout = 5
+```
+
+Both options are also part of the cache signature, so changing them triggers a
+rescan.
+
+### Why some folders hang
+
+On macOS, folders like `~/Music/Music` (Music app library) and `~/Movies/TV`
+(TV app library) are protected. A system **LaunchDaemon** cannot be granted that
+access interactively, so opening them can block indefinitely. Options:
+
+- Exclude/narrow the roots (recommended for a daemon), or
+- Grant **Full Disk Access** to
+  `<project>/.venv/bin/python` in System Settings → Privacy & Security, or
+- Run as a **LaunchAgent** instead (it inherits your user's permissions).
+
+### Logs
+
+The service logs go to `~/Library/Logs/MediaSrv.log`. Raise the level with
+`MEDIASRV_LOG_LEVEL=DEBUG` to see each directory the scanner visits.
 
 ## Run automatically at boot (launchd)
 
