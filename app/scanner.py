@@ -126,21 +126,43 @@ def _is_excluded(path: Path) -> bool:
 
 
 def _iter_files(root: Path) -> Iterator[Path]:
-    def on_error(err: OSError) -> None:
-        log.warning("scan: cannot access %s: %s", getattr(err, "filename", "?"), err)
+    """Iterate files under ``root``.
 
-    for dirpath, dirnames, filenames in os.walk(
-        root, followlinks=config.FOLLOW_SYMLINKS, onerror=on_error
-    ):
-        if config.IGNORE_HIDDEN:
-            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
-            filenames = [f for f in filenames if not f.startswith(".")]
-        dirnames[:] = [d for d in dirnames if not _is_excluded(Path(dirpath) / d)]
-        filenames = [f for f in filenames if not _is_excluded(Path(dirpath) / f)]
-        if dirnames:
-            log.info("scan: entering %s (+%d subdirs)", dirpath, len(dirnames))
-        for name in sorted(filenames):
-            yield Path(dirpath) / name
+    A manual walk (instead of os.walk) so we can log each directory *before*
+    listing it -- the last logged line identifies a folder that hangs (e.g. a
+    stalled network/external volume).
+    """
+    stack: list[Path] = [root]
+    while stack:
+        current = stack.pop()
+        log.info("scan: listing %s", current)
+        try:
+            with os.scandir(current) as it:
+                entries = list(it)
+        except OSError as err:
+            log.warning("scan: cannot list %s: %s", current, err)
+            continue
+
+        files: list[Path] = []
+        subdirs: list[Path] = []
+        for entry in entries:
+            name = entry.name
+            if config.IGNORE_HIDDEN and name.startswith("."):
+                continue
+            child = current / name
+            if _is_excluded(child):
+                continue
+            try:
+                if entry.is_dir(follow_symlinks=config.FOLLOW_SYMLINKS):
+                    subdirs.append(child)
+                else:
+                    files.append(child)
+            except OSError as err:
+                log.warning("scan: cannot stat %s: %s", child, err)
+
+        for path in sorted(files):
+            yield path
+        stack.extend(sorted(subdirs, reverse=True))
 
 
 def _kind(suffix: str) -> str | None:
