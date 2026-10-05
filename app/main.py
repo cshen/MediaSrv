@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import sys
 import threading
+import traceback
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -151,6 +153,19 @@ def _startup() -> None:
 @app.get("/api/config")
 def api_config() -> JSONResponse:
     return JSONResponse(config.public())
+
+
+@app.get("/api/debug/threads")
+def api_debug_threads() -> JSONResponse:
+    """Dump every thread's stack -- handy to find where a scan is stuck."""
+    frames = sys._current_frames()
+    stacks: dict[str, list[str]] = {}
+    for thread in threading.enumerate():
+        frame = frames.get(thread.ident)
+        if frame is None:
+            continue
+        stacks[thread.name] = [line.rstrip("\n") for line in traceback.format_stack(frame)]
+    return JSONResponse(stacks)
 
 
 @app.get("/api/tracks")
