@@ -51,3 +51,11 @@ audio_bitrate = "160k"
 # seconds. Finished segments are kept if the server stops, so a restart only
 # re-encodes what's left. Smaller = finer resume, more files.
 segment_seconds = 30
+
+[service]
+# Used by deploy/install-launchd.sh to render the launchd plist. Nothing here
+# is hard-coded into the plist; change these and re-run the installer.
+label = "com.mediasrv"        # launchd job label
+user = ""                     # user to run as; empty = current user
+log_file = ""                 # empty = ~/Library/Logs/MediaSrv.log
+path = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"

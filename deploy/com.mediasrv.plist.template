@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  MediaSrv LaunchDaemon TEMPLATE.
+
+  Do not edit the rendered values here -- they come from config.toml via
+  deploy/install-launchd.sh. Edit the [service] section of config.toml instead
+  (or ~/.config/MediaSrv/config.toml), then re-run the installer.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{LABEL}}</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{EXEC}}</string>
+    </array>
+
+    <!-- Run as this user so ~/Music, ~/Movies and ~/.cache/MediaSrv resolve. -->
+    <key>UserName</key>
+    <string>{{USER}}</string>
+
+    <key>WorkingDirectory</key>
+    <string>{{WORKDIR}}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>{{HOME}}</string>
+        <key>PATH</key>
+        <string>{{PATH}}</string>
+        <key>LANG</key>
+        <string>en_US.UTF-8</string>
+        <key>LC_ALL</key>
+        <string>en_US.UTF-8</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart whenever it stops, for any reason (crash, kill, etc.). -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>{{LOG}}</string>
+    <key>StandardErrorPath</key>
+    <string>{{LOG}}</string>
+</dict>
+</plist>

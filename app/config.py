@@ -59,6 +59,13 @@ DEFAULTS: dict[str, Any] = {
         "audio_bitrate": "160k",
         "segment_seconds": 30,  # resume granularity (shorter = finer resume)
     },
+    "service": {
+        # Used by deploy/install-launchd.sh to render the launchd plist.
+        "label": "com.mediasrv",
+        "user": "",  # empty -> the user running the installer
+        "log_file": "",  # empty -> ~/Library/Logs/MediaSrv.log
+        "path": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    },
 }
 
 
@@ -200,6 +207,16 @@ TRANSCODE_CRF = int(CONFIG["transcode"].get("crf", 23))
 TRANSCODE_PRESET = str(CONFIG["transcode"].get("preset", "veryfast"))
 TRANSCODE_AUDIO_BITRATE = str(CONFIG["transcode"].get("audio_bitrate", "160k"))
 TRANSCODE_SEGMENT_SECONDS = max(1, int(CONFIG["transcode"].get("segment_seconds", 30)))
+
+SERVICE = {
+    "label": str(CONFIG["service"].get("label") or "com.mediasrv"),
+    "user": str(CONFIG["service"].get("user") or ""),
+    "log_file": str(CONFIG["service"].get("log_file") or ""),
+    "path": str(
+        CONFIG["service"].get("path")
+        or "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    ),
+}
 
 
 def public() -> dict:

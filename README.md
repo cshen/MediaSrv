@@ -147,8 +147,57 @@ rescan endpoint:
 curl -X POST http://<IP>:9000/api/rescan
 ```
 
-The library is cached in `data/library.json` and refreshed automatically when a
-file changes.
+The library is cached in `~/.cache/MediaSrv/data/library.json` and refreshed
+automatically when a file changes.
+
+## Run automatically at boot (launchd)
+
+A LaunchDaemon starts MediaSrv at boot (no login needed) and **restarts it
+automatically if it is killed** (`RunAtLoad` + `KeepAlive`).
+
+The plist is *generated* from `config.toml` — nothing user-specific is
+hard-coded. Edit the `[service]` section (in `./config.toml` or
+`~/.config/MediaSrv/config.toml`):
+
+```toml
+[service]
+label = "com.mediasrv"        # launchd job label
+user = ""                     # run as this user; empty = current user
+log_file = ""                 # empty = ~/Library/Logs/MediaSrv.log
+path = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+```
+
+Then render/install with the helper (it reads the same config search paths and
+`MEDIASRV_*` env vars the app does):
+
+```sh
+./deploy/install-launchd.sh render      # preview the rendered plist
+./deploy/install-launchd.sh install     # install + load it (asks for sudo)
+./deploy/install-launchd.sh status      # launchd status
+tail -f ~/Library/Logs/MediaSrv.log     # logs
+```
+
+Confirm it recovers from a kill, or restart it after pulling new code:
+
+```sh
+sudo pkill -f mediasrv                                    # it should come back
+./deploy/install-launchd.sh install                       # re-render + reload
+```
+
+Uninstall:
+
+```sh
+./deploy/install-launchd.sh uninstall
+```
+
+> **No `sudo`? Use a LaunchAgent instead** — starts at login rather than boot.
+> Render with `user = ""` and remove the `UserName` key from
+> `deploy/com.mediasrv.plist.template`, then:
+> ```sh
+> ./deploy/install-launchd.sh write
+> cp deploy/generated/*.plist ~/Library/LaunchAgents/
+> launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.mediasrv.plist
+> ```
 
 ## API (for reference)
 
@@ -160,4 +209,5 @@ file changes.
 | `POST` | `/api/favorites/{id}` | Toggle a favorite |
 | `POST` | `/api/rescan` | Re-scan the media folders |
 | `GET` | `/api/cover/{id}` | Embedded album art |
+| `GET` | `/api/transcode/{id}` | Video transcode status / start |
 | `GET` | `/media/{id}` | Stream a track (supports `Range`) |
