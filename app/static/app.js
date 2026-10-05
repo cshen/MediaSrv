@@ -23,6 +23,7 @@ const state = {
   currentId: null,
   prep: {},
   watching: new Set(),
+  scanning: false,
 };
 
 const els = {
@@ -104,6 +105,7 @@ function renderList() {
 
   const heads = { audio: "Audio", video: "Video", favorites: "Favorites" };
   if (state.query) els.listHead.textContent = `Search · ${list.length}`;
+  else if (state.scanning && !list.length) els.listHead.textContent = "Scanning…";
   else els.listHead.textContent = `${heads[state.view] || "Library"} · ${list.length}`;
 
   els.empty.hidden = list.length > 0;
@@ -112,7 +114,9 @@ function renderList() {
     audio: "No audio files found.",
     video: "No videos found.",
   };
-  els.empty.textContent = emptyText[state.view] || "Nothing here yet.";
+  els.empty.textContent = state.scanning
+    ? "Scanning your library…"
+    : emptyText[state.view] || "Nothing here yet.";
 
   const frag = document.createDocumentFragment();
   list.forEach((t, i) => {
@@ -744,14 +748,39 @@ async function boot() {
   try {
     const res = await fetch("/api/tracks");
     const data = await res.json();
-    state.tracks = data.tracks || [];
-    state.byId = new Map(state.tracks.map((t) => [t.id, t]));
-    state.favorites = new Set(state.tracks.filter((t) => t.favorite).map((t) => t.id));
+    applyLibrary(data);
   } catch (_) {
     toast("Could not load library");
   }
   renderList();
-  warmTranscodes();
+  if (state.scanning) pollLibrary();
+  else warmTranscodes();
+}
+
+function applyLibrary(data) {
+  state.tracks = data.tracks || [];
+  state.byId = new Map(state.tracks.map((t) => [t.id, t]));
+  state.favorites = new Set(state.tracks.filter((t) => t.favorite).map((t) => t.id));
+  state.scanning = !!data.scanning;
+}
+
+function pollLibrary() {
+  clearTimeout(pollLibrary._timer);
+  pollLibrary._timer = setTimeout(async () => {
+    try {
+      const data = await (await fetch("/api/tracks")).json();
+      applyLibrary(data);
+      renderList();
+      if (state.scanning) {
+        pollLibrary();
+      } else {
+        toast(`Library loaded · ${state.tracks.length} items`);
+        warmTranscodes();
+      }
+    } catch (_) {
+      pollLibrary();
+    }
+  }, 2000);
 }
 
 boot();

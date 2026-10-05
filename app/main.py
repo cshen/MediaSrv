@@ -7,6 +7,7 @@ stream video.
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 import threading
 from collections.abc import Iterator
@@ -18,48 +19,83 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config, favorites, scanner, transcode
 
+log = logging.getLogger("mediasrv")
 CHUNK_SIZE = 1024 * 256
 
 app = FastAPI(title="My Media Hub", docs_url=None, redoc_url=None)
 
 
 class Library:
-    """Thread-safe in-memory view of the scanned media."""
+    """Thread-safe in-memory view of the scanned media.
+
+    Loading/scanning happens in a background thread so requests are never
+    blocked; callers read whatever is currently available and may check
+    :attr:`scanning`.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._tracks: list[dict] = []
         self._by_id: dict[str, dict] = {}
         self._loaded = False
+        self._scanning = False
+
+    @property
+    def scanning(self) -> bool:
+        with self._lock:
+            return self._scanning
 
     def ensure(self) -> None:
-        if self._loaded:
-            return
+        """Kick off a background load/scan if not already loaded/running."""
         with self._lock:
-            if self._loaded:
+            if self._loaded or self._scanning:
                 return
-            cached = scanner.load_cache()
-            if cached is None:
-                cached = scanner.scan()
-            self._tracks = cached
-            self._by_id = {t["id"]: t for t in cached}
-            self._loaded = True
+            self._scanning = True
+        threading.Thread(target=self._load, daemon=True).start()
 
-    def rescan(self) -> list[dict]:
+    def _load(self) -> None:
+        try:
+            tracks = scanner.load_cache()
+            if tracks is None:
+                tracks = scanner.scan()
+        except Exception:
+            log.exception("library load failed")
+            tracks = []
+        self._install(tracks)
+
+    def rescan(self) -> None:
+        """Kick off a background rescan (no-op if one is already running)."""
         with self._lock:
+            if self._scanning:
+                return
+            self._scanning = True
+        threading.Thread(target=self._rescan, daemon=True).start()
+
+    def _rescan(self) -> None:
+        try:
             tracks = scanner.scan()
+        except Exception:
+            log.exception("library rescan failed")
+            with self._lock:
+                tracks = self._tracks
+        self._install(tracks)
+
+    def _install(self, tracks: list[dict]) -> None:
+        with self._lock:
             self._tracks = tracks
             self._by_id = {t["id"]: t for t in tracks}
             self._loaded = True
-            return tracks
+            self._scanning = False
 
     def tracks(self) -> list[dict]:
         self.ensure()
-        return self._tracks
+        with self._lock:
+            return list(self._tracks)
 
     def get(self, tid: str) -> dict | None:
         self.ensure()
-        return self._by_id.get(tid)
+        with self._lock:
+            return self._by_id.get(tid)
 
 
 library = Library()
@@ -96,6 +132,7 @@ def _public(track: dict, fav: set[str]) -> dict:
 @app.on_event("startup")
 def _startup() -> None:
     config.ensure_dirs()
+    library.ensure()  # warm the library in the background at boot
 
 
 @app.get("/api/config")
@@ -107,13 +144,13 @@ def api_config() -> JSONResponse:
 def api_tracks() -> JSONResponse:
     fav = favorites.all_ids()
     tracks = [_public(t, fav) for t in library.tracks()]
-    return JSONResponse({"count": len(tracks), "tracks": tracks})
+    return JSONResponse({"count": len(tracks), "tracks": tracks, "scanning": library.scanning})
 
 
 @app.post("/api/rescan")
 def api_rescan() -> JSONResponse:
-    tracks = library.rescan()
-    return JSONResponse({"count": len(tracks)})
+    library.rescan()
+    return JSONResponse({"scanning": library.scanning})
 
 
 @app.get("/api/favorites")
@@ -233,6 +270,10 @@ app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 def run() -> None:
     import uvicorn
 
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     uvicorn.run(
         "app.main:app",
         host=config.HOST,

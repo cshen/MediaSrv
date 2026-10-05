@@ -148,7 +148,9 @@ curl -X POST http://<IP>:9000/api/rescan
 ```
 
 The library is cached in `~/.cache/MediaSrv/data/library.json` and refreshed
-automatically when a file changes.
+automatically when a file changes. Scanning always runs in the background, so
+the server stays responsive; the web UI shows "Scanning your library…" and
+fills in automatically when it finishes.
 
 ## Run automatically at boot (launchd)
 
