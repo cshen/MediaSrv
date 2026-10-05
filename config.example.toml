@@ -28,6 +28,10 @@ ignore_hidden = true
 # exclude = ["/Volumes/olddrive", "*TV Library*"]
 exclude = []
 
+# If a directory does not respond within this many seconds, skip it instead of
+# hanging (frozen mounts / TCC-protected app libraries). 0 disables the guard.
+directory_timeout = 10
+
 # Which file extensions count as playable.
 audio_extensions = [".mp3"]
 video_extensions = [".mp4", ".m4v", ".mov"]

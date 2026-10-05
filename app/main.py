@@ -303,10 +303,12 @@ app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 
 def run() -> None:
+    import os
+
     import uvicorn
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=os.environ.get("MEDIASRV_LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     uvicorn.run(

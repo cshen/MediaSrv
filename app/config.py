@@ -39,6 +39,9 @@ DEFAULTS: dict[str, Any] = {
         "ignore_hidden": True,
         # Path fragments / globs to skip, e.g. ["/Volumes/olddrive", "*_backup*"].
         "exclude": [],
+        # Skip a directory that does not respond within this many seconds
+        # (frozen mount / TCC-protected app library). 0 disables the guard.
+        "directory_timeout": 10,
         "audio_extensions": [".mp3"],
         "video_extensions": [".mp4", ".m4v", ".mov"],
     },
@@ -181,6 +184,7 @@ _MEDIA_DIRS = _resolve_roots()
 FOLLOW_SYMLINKS = bool(CONFIG["media"].get("follow_symlinks", False))
 IGNORE_HIDDEN = bool(CONFIG["media"].get("ignore_hidden", True))
 EXCLUDE = [str(x) for x in _as_list(CONFIG["media"].get("exclude"))]
+DIRECTORY_TIMEOUT = float(CONFIG["media"].get("directory_timeout", 10) or 0)
 
 AUDIO_EXTS = {e.lower() if e.startswith(".") else "." + e.lower() for e in _as_list(CONFIG["media"].get("audio_extensions"))}
 VIDEO_EXTS = {e.lower() if e.startswith(".") else "." + e.lower() for e in _as_list(CONFIG["media"].get("video_extensions"))}

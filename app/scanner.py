@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 from collections.abc import Iterator
 from fnmatch import fnmatch
@@ -125,44 +126,96 @@ def _is_excluded(path: Path) -> bool:
     return any(fnmatch(text, pat) or fnmatch(path.name, pat) for pat in config.EXCLUDE)
 
 
-def _iter_files(root: Path) -> Iterator[Path]:
-    """Iterate files under ``root``.
+def _list_dir(path: Path, timeout: float) -> list[tuple[str, bool]] | None:
+    """List ``path`` into ``[(name, is_dir), ...]``.
 
-    A manual walk (instead of os.walk) so we can log each directory *before*
-    listing it -- the last logged line identifies a folder that hangs (e.g. a
-    stalled network/external volume).
+    Returns None if the directory does not respond within ``timeout`` seconds
+    (a frozen mount / TCC-protected app library). The listing runs on a daemon
+    thread so a blocking syscall can never hang the scan or the server; the
+    stuck thread is simply abandoned.
     """
+    if not timeout or timeout <= 0:
+        return _list_dir_inline(path)
+
+    box: dict = {}
+
+    def work() -> None:
+        try:
+            with os.scandir(path) as it:
+                out: list[tuple[str, bool]] = []
+                for entry in it:
+                    try:
+                        is_dir = entry.is_dir(follow_symlinks=config.FOLLOW_SYMLINKS)
+                    except OSError:
+                        is_dir = False
+                    out.append((entry.name, is_dir))
+                box["entries"] = out
+        except OSError as exc:
+            box["error"] = exc
+
+    thread = threading.Thread(target=work, daemon=True, name="scan-listdir")
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        return None  # frozen: give up on this directory
+    if "error" in box:
+        log.warning("scan: cannot list %s: %s", path, box["error"])
+        return []
+    return box.get("entries", [])
+
+
+def _list_dir_inline(path: Path) -> list[tuple[str, bool]]:
+    out: list[tuple[str, bool]] = []
+    try:
+        with os.scandir(path) as it:
+            for entry in it:
+                try:
+                    is_dir = entry.is_dir(follow_symlinks=config.FOLLOW_SYMLINKS)
+                except OSError:
+                    is_dir = False
+                out.append((entry.name, is_dir))
+    except OSError as exc:
+        log.warning("scan: cannot list %s: %s", path, exc)
+    return out
+
+
+def _iter_files(root: Path) -> Iterator[Path]:
+    """Iterate files under ``root``, skipping directories that never respond."""
+    timeout = config.DIRECTORY_TIMEOUT
     stack: list[Path] = [root]
+    frozen = 0
     while stack:
         current = stack.pop()
-        log.info("scan: listing %s", current)
-        try:
-            with os.scandir(current) as it:
-                entries = list(it)
-        except OSError as err:
-            log.warning("scan: cannot list %s: %s", current, err)
+        log.debug("scan: listing %s", current)
+        listing = _list_dir(current, timeout)
+        if listing is None:
+            frozen += 1
+            log.warning(
+                "scan: skipping frozen directory %s (no response in %ss)",
+                current,
+                timeout,
+            )
             continue
 
         files: list[Path] = []
         subdirs: list[Path] = []
-        for entry in entries:
-            name = entry.name
+        for name, is_dir in listing:
             if config.IGNORE_HIDDEN and name.startswith("."):
                 continue
             child = current / name
             if _is_excluded(child):
                 continue
-            try:
-                if entry.is_dir(follow_symlinks=config.FOLLOW_SYMLINKS):
-                    subdirs.append(child)
-                else:
-                    files.append(child)
-            except OSError as err:
-                log.warning("scan: cannot stat %s: %s", child, err)
+            if is_dir:
+                subdirs.append(child)
+            else:
+                files.append(child)
 
         for path in sorted(files):
             yield path
         stack.extend(sorted(subdirs, reverse=True))
+
+    if frozen:
+        log.warning("scan: skipped %d frozen director(ies)", frozen)
 
 
 def _kind(suffix: str) -> str | None:
@@ -292,6 +345,7 @@ def _cache_signature() -> dict:
         "follow_symlinks": config.FOLLOW_SYMLINKS,
         "ignore_hidden": config.IGNORE_HIDDEN,
         "exclude": list(config.EXCLUDE),
+        "directory_timeout": config.DIRECTORY_TIMEOUT,
     }
 
 
