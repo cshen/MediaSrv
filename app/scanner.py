@@ -269,6 +269,7 @@ def _cache_signature() -> dict:
         "video_extensions": sorted(config.VIDEO_EXTS),
         "follow_symlinks": config.FOLLOW_SYMLINKS,
         "ignore_hidden": config.IGNORE_HIDDEN,
+        "exclude": list(config.EXCLUDE),
     }
 
 
