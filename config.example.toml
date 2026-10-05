@@ -23,6 +23,11 @@ follow_symlinks = false
 # Skip dotfiles and dot-directories.
 ignore_hidden = true
 
+# Skip these paths. Each entry is matched as a glob against the full path and
+# the folder/file name. Useful for a stalled network/external volume.
+# exclude = ["/Volumes/olddrive", "*TV Library*"]
+exclude = []
+
 # Which file extensions count as playable.
 audio_extensions = [".mp3"]
 video_extensions = [".mp4", ".m4v", ".mov"]

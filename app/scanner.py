@@ -15,6 +15,7 @@ import logging
 import os
 import time
 from collections.abc import Iterator
+from fnmatch import fnmatch
 from pathlib import Path
 
 from . import config, transcode
@@ -117,11 +118,27 @@ def _read_metadata(path: Path, tid: str) -> tuple[dict, str | None]:
     return info, cover
 
 
+def _is_excluded(path: Path) -> bool:
+    if not config.EXCLUDE:
+        return False
+    text = str(path)
+    return any(fnmatch(text, pat) or fnmatch(path.name, pat) for pat in config.EXCLUDE)
+
+
 def _iter_files(root: Path) -> Iterator[Path]:
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=config.FOLLOW_SYMLINKS):
+    def on_error(err: OSError) -> None:
+        log.warning("scan: cannot access %s: %s", getattr(err, "filename", "?"), err)
+
+    for dirpath, dirnames, filenames in os.walk(
+        root, followlinks=config.FOLLOW_SYMLINKS, onerror=on_error
+    ):
         if config.IGNORE_HIDDEN:
             dirnames[:] = [d for d in dirnames if not d.startswith(".")]
             filenames = [f for f in filenames if not f.startswith(".")]
+        dirnames[:] = [d for d in dirnames if not _is_excluded(Path(dirpath) / d)]
+        filenames = [f for f in filenames if not _is_excluded(Path(dirpath) / f)]
+        if dirnames:
+            log.info("scan: entering %s (+%d subdirs)", dirpath, len(dirnames))
         for name in sorted(filenames):
             yield Path(dirpath) / name
 
@@ -154,6 +171,7 @@ def _list_media() -> list[tuple[Path, str]]:
         if not root.exists():
             log.warning("media folder does not exist: %s", root)
             continue
+        log.info("scan: walking root %s", root)
         for path in _iter_files(root):
             kind = _kind(path.suffix.lower())
             if not kind:

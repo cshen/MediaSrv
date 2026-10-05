@@ -37,6 +37,8 @@ DEFAULTS: dict[str, Any] = {
         "paths": [],
         "follow_symlinks": False,
         "ignore_hidden": True,
+        # Path fragments / globs to skip, e.g. ["/Volumes/olddrive", "*_backup*"].
+        "exclude": [],
         "audio_extensions": [".mp3"],
         "video_extensions": [".mp4", ".m4v", ".mov"],
     },
@@ -178,6 +180,7 @@ _MEDIA_DIRS = _resolve_roots()
 
 FOLLOW_SYMLINKS = bool(CONFIG["media"].get("follow_symlinks", False))
 IGNORE_HIDDEN = bool(CONFIG["media"].get("ignore_hidden", True))
+EXCLUDE = [str(x) for x in _as_list(CONFIG["media"].get("exclude"))]
 
 AUDIO_EXTS = {e.lower() if e.startswith(".") else "." + e.lower() for e in _as_list(CONFIG["media"].get("audio_extensions"))}
 VIDEO_EXTS = {e.lower() if e.startswith(".") else "." + e.lower() for e in _as_list(CONFIG["media"].get("video_extensions"))}
