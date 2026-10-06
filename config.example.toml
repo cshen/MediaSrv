@@ -34,7 +34,7 @@ directory_timeout = 10
 
 # Which file extensions count as playable.
 audio_extensions = [".mp3"]
-video_extensions = [".mp4", ".m4v", ".mov"]
+video_extensions = [".mp4", ".m4v", ".mov", ".mkv", ".webm"]
 # Want more? e.g. audio_extensions = [".mp3", ".m4a", ".flac", ".aac"]
 
 [player]

@@ -365,10 +365,13 @@ def scan(progress=None) -> list[dict]:
             meta, cover = _read_metadata(path, tid)
 
             codec = ""
+            audio_codec = ""
             web_safe = True
             if kind == "video":
-                codec = transcode.probe_codec(path) or ""
-                web_safe = transcode.is_web_safe(codec)
+                streams = transcode.probe_streams(path)
+                codec = streams.get("video") or ""
+                audio_codec = streams.get("audio") or ""
+                web_safe = transcode.is_web_safe(path.suffix.lower(), codec, streams.get("audio"))
 
             tracks.append(
                 {
@@ -380,6 +383,7 @@ def scan(progress=None) -> list[dict]:
                     "type": kind,
                     "ext": path.suffix.lower().lstrip("."),
                     "codec": codec,
+                    "audio_codec": audio_codec,
                     "web_safe": web_safe,
                     "size": stat.st_size,
                     "mtime": stat.st_mtime,
@@ -416,7 +420,7 @@ def scan(progress=None) -> list[dict]:
 
 def _cache_signature() -> dict:
     return {
-        "schema": 3,
+        "schema": 4,
         "roots": [str(p) for p in config.media_dirs()],
         "audio_extensions": sorted(config.AUDIO_EXTS),
         "video_extensions": sorted(config.VIDEO_EXTS),

@@ -43,7 +43,7 @@ DEFAULTS: dict[str, Any] = {
         # (frozen mount / TCC-protected app library). 0 disables the guard.
         "directory_timeout": 10,
         "audio_extensions": [".mp3"],
-        "video_extensions": [".mp4", ".m4v", ".mov"],
+        "video_extensions": [".mp4", ".m4v", ".mov", ".mkv", ".webm"],
     },
     "player": {
         # Sent to the web UI as starting defaults (localStorage still wins).

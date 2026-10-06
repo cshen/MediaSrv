@@ -139,6 +139,7 @@ def _public(track: dict, fav: set[str]) -> dict:
         "cover": f"/api/cover/{track['id']}" if track["has_cover"] else None,
         "src": f"/media/{track['id']}",
         "codec": track.get("codec", ""),
+        "audio_codec": track.get("audio_codec", ""),
         "web_safe": track.get("web_safe", True),
         "needs_transcode": _needs_transcode(track),
     }

@@ -104,22 +104,38 @@ Relative media paths are resolved against the config file. Multiple roots in
 
 ## Video compatibility & transcoding
 
-iPadOS Safari can only decode a limited set of video codecs inside MP4
-(H.264/HEVC); **VP9, AV1, etc. will not play**, even though desktop Safari may
-play them. MediaSrv probes each video with `ffprobe` at scan time and, for any
-non-web-safe codec, transcodes it on demand to **H.264 + AAC (faststart)** in
-`data/transcoded/`. The original file is never modified.
+Browsers are picky about both the **container** and the **codecs**. Safari can
+play a file as-is only when it is:
 
-- Transcoding starts automatically when the page loads (it warms the library)
-  and when you tap such a video; the player shows an "Optimizing video… %"
-  overlay until it's ready.
-- Only one video is transcoded at a time. On Apple Silicon it uses the
-  hardware encoder (`h264_videotoolbox`) and is usually much faster than
-  real time.
-- The result is cached, so it only happens once per file.
-- **Resumable:** the source is transcoded in segments, so if the server is
-  stopped mid-way the finished segments are kept and only the rest is redone on
-  the next run (tune with `segment_seconds`).
+> container ∈ { **.mp4, .m4v, .mov** } **and** video = **H.264** **and**
+> audio ∈ { **AAC, MP3** } (or no audio).
+
+Everything else is converted to an MP4 with **H.264 + AAC (faststart)** in
+`~/.cache/MediaSrv/data/transcoded/`. That includes:
+
+- unsupported containers — **`.mkv`, `.webm`**, etc. (even if the codecs inside
+  are H.264/AAC — Safari can't open Matroska at all),
+- unsupported video — **VP9, AV1, HEVC, …**,
+- unsupported audio — **DTS, AC-3, Opus, …**.
+
+`ffprobe` inspects each file at scan time and picks the cheapest conversion:
+
+| Situation | Action |
+| --- | --- |
+| MP4/MOV + H.264 + AAC/MP3 | play as-is (no work) |
+| H.264 + AAC/MP3 in another container (e.g. `.mkv`) | **remux** — `-c copy`, instant & lossless |
+| H.264 + other audio (DTS/AC-3/…) | copy video, **re-encode audio only** |
+| other video codec (VP9/AV1/HEVC/…) | full **re-encode** (segmented, resumable) |
+
+Notes:
+
+- Transcoding starts when the page loads (warm-up) and when you tap such a
+  video; the player shows "Optimizing video… %" until it's ready, then plays.
+- Only one file is converted at a time; full re-encodes use the hardware encoder
+  (`h264_videotoolbox`) on Apple Silicon and are usually faster than real time.
+- Results are cached, so it happens once per file. Full re-encodes are
+  **resumable** (segmented; tune with `segment_seconds`).
+- Default `video_extensions` is `[".mp4", ".m4v", ".mov", ".mkv", ".webm"]`.
 - Disable/tune it in `config.toml` under `[transcode]`.
 
 ## Connect from the iPad

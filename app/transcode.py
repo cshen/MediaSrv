@@ -21,8 +21,10 @@ from pathlib import Path
 
 from . import config
 
-# Codecs every browser (including iPadOS Safari) plays inside MP4.
-WEB_SAFE_CODECS = {"h264"}
+# What browsers (especially iPadOS Safari) can play natively inside <video>.
+WEB_SAFE_CONTAINERS = {".mp4", ".m4v", ".mov"}
+WEB_SAFE_VIDEO = {"h264"}
+WEB_SAFE_AUDIO = {"aac", "mp3"}
 
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
@@ -34,17 +36,22 @@ def available() -> bool:
     return bool(FFMPEG and FFPROBE)
 
 
-def probe_codec(path: Path) -> str | None:
-    """Return the video stream codec name, or None if it cannot be determined."""
+def _container(track: dict) -> str:
+    ext = (track.get("ext") or "").lower().lstrip(".")
+    return f".{ext}" if ext else ""
+
+
+def probe_streams(path: Path) -> dict:
+    """Return ``{"video": codec|None, "audio": codec|None}`` for a file."""
+    result = {"video": None, "audio": None}
     if not FFPROBE:
-        return None
+        return result
     try:
-        result = subprocess.run(
+        proc = subprocess.run(
             [
                 FFPROBE,
                 "-v", "error",
-                "-select_streams", "v:0",
-                "-show_entries", "stream=codec_name",
+                "-show_entries", "stream=codec_type,codec_name:stream_disposition=attached_pic",
                 "-of", "json",
                 str(path),
             ],
@@ -52,20 +59,49 @@ def probe_codec(path: Path) -> str | None:
             text=True,
             timeout=60,
         )
-        data = json.loads(result.stdout or "{}")
-        streams = data.get("streams") or []
-        if streams:
-            return str(streams[0].get("codec_name") or "").lower() or None
+        data = json.loads(proc.stdout or "{}")
+        for stream in data.get("streams", []):
+            kind = stream.get("codec_type")
+            codec = (stream.get("codec_name") or "").lower()
+            attached = (stream.get("disposition") or {}).get("attached_pic")
+            if kind == "video" and not attached and result["video"] is None:
+                result["video"] = codec or None
+            elif kind == "audio" and result["audio"] is None:
+                result["audio"] = codec or None
     except Exception:
-        return None
-    return None
+        pass
+    return result
 
 
-def is_web_safe(codec: str | None) -> bool:
-    # Unknown codec -> assume playable so we never transcode unnecessarily.
-    if not codec:
-        return True
-    return codec.lower() in WEB_SAFE_CODECS
+def probe_codec(path: Path) -> str | None:
+    """Return the (first real) video stream codec name, or None."""
+    return probe_streams(path)["video"]
+
+
+def is_web_safe(container: str, video: str | None, audio: str | None) -> bool:
+    """True only if Safari can play it as-is: MP4/MOV + H.264 + AAC/MP3."""
+    container = (container or "").lower()
+    video = (video or "").lower()
+    audio = (audio or "").lower()
+    if container not in WEB_SAFE_CONTAINERS:
+        return False
+    if video not in WEB_SAFE_VIDEO:
+        return False
+    if audio and audio not in WEB_SAFE_AUDIO:
+        return False
+    return True
+
+
+def strategy(container: str, video: str | None, audio: str | None) -> str:
+    """How to make a file playable: none | remux | audio | video."""
+    if is_web_safe(container, video, audio):
+        return "none"
+    if (video or "").lower() in WEB_SAFE_VIDEO:
+        # Video is fine: just repackage, and only touch audio if needed.
+        if not audio or audio.lower() in WEB_SAFE_AUDIO:
+            return "remux"
+        return "audio"
+    return "video"
 
 
 def _has_encoder(name: str) -> bool:
@@ -164,18 +200,59 @@ class Transcoder:
     # ---------------------------------------------------------------- worker
     def _run(self, track: dict) -> None:
         tid = track["id"]
-        src = Path(track["path"])
         out = self.output_path(tid)
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp_out = out.parent / f"{out.stem}.part.mp4"
+        self._set(tid, state="processing", progress=0, error=None)
 
+        plan = strategy(_container(track), track.get("codec"), track.get("audio_codec"))
+        try:
+            if plan in ("remux", "audio"):
+                self._run_simple(track, plan, tmp_out)
+            else:
+                self._run_segmented(track, tmp_out)
+            tmp_out.replace(out)
+            self._set(tid, state="ready", progress=100, error=None)
+        except Exception as exc:
+            self._set(tid, state="error", error=str(exc))
+            try:
+                tmp_out.unlink()
+            except OSError:
+                pass
+
+    def _run_simple(self, track: dict, plan: str, dst: Path) -> None:
+        """Fast path: repackage to MP4 with stream copy (no re-encoding).
+
+        ``remux`` copies video and audio; ``audio`` copies video and only
+        re-encodes the audio (e.g. DTS/AC3 -> AAC).
+        """
+        tid = track["id"]
+        src = Path(track["path"])
+        duration = float(track.get("duration") or 0.0)
+
+        cmd = [FFMPEG, "-y", "-v", "error", "-i", str(src), "-map", "0:v:0", "-map", "0:a:0?"]
+        cmd += ["-c:v", "copy"]
+        if plan == "remux":
+            cmd += ["-c:a", "copy"]
+        else:
+            cmd += ["-c:a", "aac", "-b:a", config.TRANSCODE_AUDIO_BITRATE]
+        cmd += ["-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(dst)]
+
+        def report(secs: float) -> None:
+            if duration > 0:
+                self._set(tid, progress=max(0, min(99, int(secs / duration * 100))))
+
+        self._exec(cmd, report)
+
+    def _run_segmented(self, track: dict, tmp_out: Path) -> None:
+        """Resumable full re-encode, written as fixed-length segments."""
+        tid = track["id"]
+        src = Path(track["path"])
         seg_dir = self._work_dir(tid)
         seg_dir.mkdir(parents=True, exist_ok=True)
 
         duration = float(track.get("duration") or 0.0)
         seg_len = max(1, config.TRANSCODE_SEGMENT_SECONDS)
-
-        self._set(tid, state="processing", progress=0, error=None)
 
         # If the source changed, throw away any segments from a previous run.
         try:
@@ -195,41 +272,32 @@ class Transcoder:
 
         total = max(1, math.ceil(duration / seg_len)) if duration > 0 else None
 
-        try:
-            index = 0
-            while total is None or index < total:
-                if duration > 0 and index * seg_len >= duration:
-                    break
-                seg_final = seg_dir / f"seg-{index:05d}.mp4"
-                if not seg_final.exists():
-                    seg_part = seg_dir / f"seg-{index:05d}.part.mp4"
-                    start = index * seg_len
+        index = 0
+        while total is None or index < total:
+            if duration > 0 and index * seg_len >= duration:
+                break
+            seg_final = seg_dir / f"seg-{index:05d}.mp4"
+            if not seg_final.exists():
+                seg_part = seg_dir / f"seg-{index:05d}.part.mp4"
+                start = index * seg_len
 
-                    def report(secs: float, i: int = index) -> None:
-                        frac = min(1.0, secs / seg_len) if seg_len else 0.0
-                        pct = int(((i + frac) / total) * 90) if total else 0
-                        self._set(tid, progress=max(0, min(89, pct)))
+                def report(secs: float, i: int = index) -> None:
+                    frac = min(1.0, secs / seg_len) if seg_len else 0.0
+                    pct = int(((i + frac) / total) * 90) if total else 0
+                    self._set(tid, progress=max(0, min(89, pct)))
 
-                    self._exec(self._segment_cmd(src, seg_part, start, seg_len), report)
-                    seg_part.replace(seg_final)
-                index += 1
-                if total:
-                    self._set(tid, progress=min(90, int(index / total * 90)))
-            if total is None:
-                total = index
+                self._exec(self._segment_cmd(src, seg_part, start, seg_len), report)
+                seg_part.replace(seg_final)
+            index += 1
+            if total:
+                self._set(tid, progress=min(90, int(index / total * 90)))
+        if total is None:
+            total = index
 
-            self._set(tid, progress=92)
-            self._exec(self._concat_cmd(seg_dir, tmp_out, total))
-            self._set(tid, progress=99)
-            tmp_out.replace(out)
-            shutil.rmtree(seg_dir, ignore_errors=True)
-            self._set(tid, state="ready", progress=100, error=None)
-        except Exception as exc:
-            self._set(tid, state="error", error=str(exc))
-            try:
-                tmp_out.unlink()
-            except OSError:
-                pass
+        self._set(tid, progress=92)
+        self._exec(self._concat_cmd(seg_dir, tmp_out, total))
+        self._set(tid, progress=99)
+        shutil.rmtree(seg_dir, ignore_errors=True)
 
     def _exec(self, cmd: list[str], on_progress=None) -> None:
         assert FFMPEG is not None
