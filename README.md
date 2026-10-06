@@ -229,6 +229,20 @@ invalidates the library cache, so just restart and it re-reads the tags.
 The service logs go to `~/Library/Logs/MediaSrv.log`. Raise the level with
 `MEDIASRV_LOG_LEVEL=DEBUG` to see each directory the scanner visits.
 
+### Doctor panel (web)
+
+Click the gear button in the header for a small **Doctor** panel. It can run
+only a fixed set of safe commands (never arbitrary input):
+
+- **Transcode cache size** – sizes of the configured + default `transcoded/`
+  folders (warns over 20 GB).
+- **Disk usage** – `df -h`.
+- **List transcoded files** – contents of `transcoded/`.
+- **System monitor** – `htop`, else `top` (htop is captured as a ~2s
+  snapshot; `top` runs in batch mode).
+- **Clear partial segments** (danger, asks to confirm) – removes
+  `transcoded/<id>/` work folders and `*.part.mp4`, keeping finished `.mp4`s.
+
 ## Run automatically at boot (launchd)
 
 A LaunchDaemon starts MediaSrv at boot (no login needed) and **restarts it

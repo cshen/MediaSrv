@@ -18,8 +18,9 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-from . import config, favorites, scanner, transcode
+from . import config, doctor, favorites, scanner, transcode
 
 log = logging.getLogger("mediasrv")
 CHUNK_SIZE = 1024 * 256
@@ -187,6 +188,30 @@ def api_tracks() -> JSONResponse:
 def api_rescan() -> JSONResponse:
     library.rescan()
     return JSONResponse({"scanning": library.scanning})
+
+
+class DoctorRun(BaseModel):
+    id: str
+    confirm: bool = False
+
+
+@app.get("/api/doctor/commands")
+def api_doctor_commands() -> JSONResponse:
+    return JSONResponse(doctor.public_commands())
+
+
+@app.post("/api/doctor/run")
+def api_doctor_run(body: DoctorRun) -> JSONResponse:
+    cmd = next((c for c in doctor.COMMANDS if c["id"] == body.id), None)
+    if cmd is None:
+        raise HTTPException(status_code=404, detail="unknown command")
+    if cmd["danger"] and not body.confirm:
+        raise HTTPException(status_code=400, detail="confirmation required")
+    try:
+        output = doctor.run(body.id)
+    except Exception as exc:
+        output = f"error: {exc}"
+    return JSONResponse({"output": output})
 
 
 @app.get("/api/favorites")

@@ -25,6 +25,7 @@ const state = {
   watching: new Set(),
   scanning: false,
   progress: { done: 0, total: 0 },
+  doctorCmds: [],
 };
 
 const els = {
@@ -52,6 +53,11 @@ const els = {
   fsExit: $("fsExit"),
   prep: $("prep"),
   prepText: $("prepText"),
+  doctorBtn: $("doctorBtn"),
+  doctorModal: $("doctorModal"),
+  doctorCmds: $("doctorCmds"),
+  doctorOut: $("doctorOut"),
+  doctorClose: $("doctorClose"),
   volume: $("volume"),
   toast: $("toast"),
 };
@@ -715,6 +721,59 @@ function setupResizer() {
   });
 }
 
+/* ---------------- Doctor panel ---------------- */
+function setupDoctor() {
+  const close = () => { els.doctorModal.hidden = true; };
+  els.doctorBtn.addEventListener("click", () => {
+    els.doctorModal.hidden = false;
+    if (!state.doctorCmds.length) loadDoctorCommands();
+  });
+  els.doctorClose.addEventListener("click", close);
+  els.doctorModal.addEventListener("click", (e) => {
+    if (e.target === els.doctorModal) close();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !els.doctorModal.hidden) close();
+  });
+}
+
+async function loadDoctorCommands() {
+  try {
+    state.doctorCmds = await (await fetch("/api/doctor/commands")).json();
+  } catch (_) {
+    state.doctorCmds = [];
+  }
+  renderDoctorCmds();
+}
+
+function renderDoctorCmds() {
+  els.doctorCmds.innerHTML = "";
+  state.doctorCmds.forEach((c) => {
+    const btn = document.createElement("button");
+    btn.className = "doctor-cmd" + (c.danger ? " danger" : "");
+    btn.textContent = c.label;
+    if (c.description) btn.title = c.description;
+    btn.addEventListener("click", () => runDoctor(c));
+    els.doctorCmds.appendChild(btn);
+  });
+}
+
+async function runDoctor(c) {
+  if (c.danger && !window.confirm(`Run "${c.label}"?\n\n${c.description || ""}`)) return;
+  els.doctorOut.textContent = `Running ${c.label}…`;
+  try {
+    const res = await fetch("/api/doctor/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: c.id, confirm: true }),
+    });
+    const data = await res.json();
+    els.doctorOut.textContent = data.output ?? data.detail ?? JSON.stringify(data);
+  } catch (err) {
+    els.doctorOut.textContent = "error: " + err;
+  }
+}
+
 /* ---------------- boot ---------------- */
 function applySkipLabels() {
   document.querySelectorAll("#back text, #fwd text").forEach((t) => {
@@ -728,6 +787,7 @@ async function boot() {
   setupMediaSession();
   setupResizer();
   setupVideoFeatures();
+  setupDoctor();
 
   let cfg = { player: {} };
   try {

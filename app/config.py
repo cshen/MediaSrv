@@ -22,12 +22,13 @@ from pathlib import Path
 from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_DATA_DIR = Path.home() / ".cache" / "MediaSrv" / "data"
 
 DEFAULTS: dict[str, Any] = {
     "server": {
         "host": "0.0.0.0",
         "port": 9000,
-        "data_dir": str(Path.home() / ".cache" / "MediaSrv" / "data"),
+        "data_dir": str(DEFAULT_DATA_DIR),
     },
     "media": {
         # Folder roots. Audio/video are combined for scanning; the split is
