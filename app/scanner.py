@@ -364,6 +364,7 @@ def scan(progress=None) -> list[dict]:
             stat = path.stat()
             meta, cover = _read_metadata(path, tid)
 
+            duration = meta["duration"]
             codec = ""
             audio_codec = ""
             web_safe = True
@@ -372,6 +373,8 @@ def scan(progress=None) -> list[dict]:
                 codec = streams.get("video") or ""
                 audio_codec = streams.get("audio") or ""
                 web_safe = transcode.is_web_safe(path.suffix.lower(), codec, streams.get("audio"))
+                if streams.get("duration"):
+                    duration = streams["duration"]
 
             tracks.append(
                 {
@@ -379,7 +382,7 @@ def scan(progress=None) -> list[dict]:
                     "title": meta["title"],
                     "artist": meta["artist"],
                     "album": meta["album"],
-                    "duration": meta["duration"],
+                    "duration": duration,
                     "type": kind,
                     "ext": path.suffix.lower().lstrip("."),
                     "codec": codec,

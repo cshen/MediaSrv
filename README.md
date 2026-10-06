@@ -134,7 +134,8 @@ Notes:
 - Only one file is converted at a time; full re-encodes use the hardware encoder
   (`h264_videotoolbox`) on Apple Silicon and are usually faster than real time.
 - Results are cached, so it happens once per file. Full re-encodes are
-  **resumable** (segmented; tune with `segment_seconds`).
+  **resumable** (segmented; tune with `segment_seconds`); if a file's duration
+  can't be determined, it falls back to a single-pass encode.
 - Default `video_extensions` is `[".mp4", ".m4v", ".mov", ".mkv", ".webm"]`.
 - Disable/tune it in `config.toml` under `[transcode]`.
 

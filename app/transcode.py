@@ -13,6 +13,7 @@ followed by a fast stream-copy concat into the final MP4.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import shutil
 import subprocess
@@ -20,6 +21,8 @@ import threading
 from pathlib import Path
 
 from . import config
+
+log = logging.getLogger("mediasrv.transcode")
 
 # What browsers (especially iPadOS Safari) can play natively inside <video>.
 WEB_SAFE_CONTAINERS = {".mp4", ".m4v", ".mov"}
@@ -42,8 +45,8 @@ def _container(track: dict) -> str:
 
 
 def probe_streams(path: Path) -> dict:
-    """Return ``{"video": codec|None, "audio": codec|None}`` for a file."""
-    result = {"video": None, "audio": None}
+    """Return ``{"video","audio","duration"}`` for a file."""
+    result: dict = {"video": None, "audio": None, "duration": 0.0}
     if not FFPROBE:
         return result
     try:
@@ -51,7 +54,8 @@ def probe_streams(path: Path) -> dict:
             [
                 FFPROBE,
                 "-v", "error",
-                "-show_entries", "stream=codec_type,codec_name:stream_disposition=attached_pic",
+                "-show_entries",
+                "stream=codec_type,codec_name:stream_disposition=attached_pic:format=duration",
                 "-of", "json",
                 str(path),
             ],
@@ -68,6 +72,10 @@ def probe_streams(path: Path) -> dict:
                 result["video"] = codec or None
             elif kind == "audio" and result["audio"] is None:
                 result["audio"] = codec or None
+        try:
+            result["duration"] = round(float(data.get("format", {}).get("duration") or 0.0), 2)
+        except (TypeError, ValueError):
+            result["duration"] = 0.0
     except Exception:
         pass
     return result
@@ -248,18 +256,27 @@ class Transcoder:
         """Resumable full re-encode, written as fixed-length segments."""
         tid = track["id"]
         src = Path(track["path"])
+
+        duration = float(track.get("duration") or 0.0)
+        if duration <= 0:
+            duration = float(probe_streams(src).get("duration") or 0.0)
+        seg_len = max(1, config.TRANSCODE_SEGMENT_SECONDS)
+
+        # Without a known duration we can't segment safely -> single pass.
+        if duration <= 0:
+            log.warning("transcode: unknown duration for %s; encoding in one pass", src)
+            self._run_full(track, tmp_out)
+            return
+
         seg_dir = self._work_dir(tid)
         seg_dir.mkdir(parents=True, exist_ok=True)
 
-        duration = float(track.get("duration") or 0.0)
-        seg_len = max(1, config.TRANSCODE_SEGMENT_SECONDS)
-
-        # If the source changed, throw away any segments from a previous run.
+        # Discard segments from a previous run if the source or settings changed.
         try:
             src_mtime = src.stat().st_mtime
         except OSError:
             src_mtime = 0.0
-        want_meta = {"path": str(src), "mtime": src_mtime, "segment": seg_len}
+        want_meta = {"v": 2, "path": str(src), "mtime": src_mtime, "segment": seg_len}
         meta_file = seg_dir / "meta.json"
         try:
             existing_meta = json.loads(meta_file.read_text(encoding="utf-8"))
@@ -270,12 +287,10 @@ class Transcoder:
             seg_dir.mkdir(parents=True, exist_ok=True)
             meta_file.write_text(json.dumps(want_meta), encoding="utf-8")
 
-        total = max(1, math.ceil(duration / seg_len)) if duration > 0 else None
+        total = max(1, math.ceil(duration / seg_len))
 
         index = 0
-        while total is None or index < total:
-            if duration > 0 and index * seg_len >= duration:
-                break
+        while index < total:
             seg_final = seg_dir / f"seg-{index:05d}.mp4"
             if not seg_final.exists():
                 seg_part = seg_dir / f"seg-{index:05d}.part.mp4"
@@ -283,21 +298,39 @@ class Transcoder:
 
                 def report(secs: float, i: int = index) -> None:
                     frac = min(1.0, secs / seg_len) if seg_len else 0.0
-                    pct = int(((i + frac) / total) * 90) if total else 0
-                    self._set(tid, progress=max(0, min(89, pct)))
+                    self._set(tid, progress=max(0, min(89, int(((i + frac) / total) * 90))))
 
                 self._exec(self._segment_cmd(src, seg_part, start, seg_len), report)
                 seg_part.replace(seg_final)
+                # An empty segment means we overran a broken/unknown duration.
+                try:
+                    if index < total - 1 and seg_final.stat().st_size < 1024:
+                        raise RuntimeError("ffmpeg produced an empty segment (bad duration?)")
+                except OSError:
+                    pass
             index += 1
-            if total:
-                self._set(tid, progress=min(90, int(index / total * 90)))
-        if total is None:
-            total = index
+            self._set(tid, progress=min(90, int(index / total * 90)))
 
         self._set(tid, progress=92)
         self._exec(self._concat_cmd(seg_dir, tmp_out, total))
         self._set(tid, progress=99)
         shutil.rmtree(seg_dir, ignore_errors=True)
+
+    def _run_full(self, track: dict, dst: Path) -> None:
+        """Single-pass full re-encode (used when the duration is unknown)."""
+        tid = track["id"]
+        src = Path(track["path"])
+        cmd = [FFMPEG, "-y", "-v", "error", "-i", str(src), "-map", "0:v:0", "-map", "0:a:0?"]
+        cmd += self._encoder_args()
+        cmd += [
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", config.TRANSCODE_AUDIO_BITRATE,
+            "-movflags", "+faststart",
+            "-progress", "pipe:1", "-nostats",
+            str(dst),
+        ]
+        self._exec(cmd, lambda secs: None)
+        self._set(tid, progress=99)
 
     def _exec(self, cmd: list[str], on_progress=None) -> None:
         assert FFMPEG is not None
