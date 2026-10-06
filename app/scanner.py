@@ -43,6 +43,73 @@ def _first(value) -> str:
     return str(value) if value else ""
 
 
+def _decode_bytes(raw: bytes) -> str:
+    for enc in ("utf-8", "gb18030", "big5"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1", "replace")
+
+
+def _fix_mojibake(text: str | None) -> str:
+    """Repair CJK text whose bytes were decoded as Latin-1.
+
+    Old ID3 tags often store UTF-8 or GBK bytes but label them Latin-1, giving
+    mojibake like ``ÐíÃÀ¾²`` (GBK "许美静") or ``å¤©ç¢`` (UTF-8 "天盛"). We
+    recover the original bytes and try the real encodings.
+    """
+    if not text:
+        return ""
+    if any("\u4e00" <= c <= "\u9fff" for c in text):
+        return text  # already valid CJK
+    if not any(0x80 <= ord(c) <= 0xFF for c in text):
+        return text  # pure ASCII/Latin-1, nothing to fix
+    try:
+        raw = text.encode("latin-1")
+    except UnicodeEncodeError:
+        return text
+    for enc in ("utf-8", "gb18030", "big5"):
+        try:
+            candidate = raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+        if any("\u4e00" <= c <= "\u9fff" for c in candidate):
+            return candidate
+    return text
+
+
+def _pick_text(primary: str | None, fallback: str | None) -> str:
+    """Prefer the repaired primary value; use the fallback if primary is lossy."""
+    a = _fix_mojibake(primary)
+    b = _fix_mojibake(fallback)
+    if b and (not a or "?" in a) and "?" not in b:
+        return b
+    return a or b
+
+
+def _read_id3v1(path: Path) -> dict | None:
+    """Read the ID3v1 tag (last 128 bytes) of an MP3, if present."""
+    try:
+        with path.open("rb") as fh:
+            fh.seek(-128, os.SEEK_END)
+            tail = fh.read(128)
+    except OSError:
+        return None
+    if len(tail) < 128 or tail[:3] != b"TAG":
+        return None
+
+    def field(chunk: bytes) -> str:
+        chunk = chunk.split(b"\x00", 1)[0].rstrip(b" ")
+        return _decode_bytes(chunk)
+
+    return {
+        "title": field(tail[3:33]),
+        "artist": field(tail[33:63]),
+        "album": field(tail[63:93]),
+    }
+
+
 def _extract_cover(audio, tid: str) -> str | None:
     """Extract embedded artwork from an already-opened mutagen file."""
     data: bytes | None = None
@@ -78,16 +145,19 @@ def _extract_cover(audio, tid: str) -> str | None:
 
 def _read_metadata(path: Path, tid: str) -> tuple[dict, str | None]:
     """Read tags, duration and cover from a file, opening it only once."""
-    info = {"title": path.stem, "artist": "", "album": "", "duration": 0.0}
+    info = {"title": "", "artist": "", "album": "", "duration": 0.0}
     if MutagenFile is None:
+        info["title"] = path.stem
         return info, None
 
     try:
         audio = MutagenFile(path)
     except Exception as exc:
         log.warning("could not read tags for %s: %s", path, exc)
+        info["title"] = path.stem
         return info, None
     if audio is None:
+        info["title"] = path.stem
         return info, None
 
     try:
@@ -97,23 +167,31 @@ def _read_metadata(path: Path, tid: str) -> tuple[dict, str | None]:
     except Exception:
         pass
 
+    v2: dict[str, str | None] = {"title": None, "artist": None, "album": None}
     tags = getattr(audio, "tags", None)
     if tags:
         try:
             for key in ("title", "TIT2", "\xa9nam"):
                 if key in tags:
-                    info["title"] = _first(tags[key]) or info["title"]
+                    v2["title"] = _first(tags[key])
                     break
             for key in ("artist", "TPE1", "\xa9ART", "aART"):
                 if key in tags:
-                    info["artist"] = _first(tags[key])
+                    v2["artist"] = _first(tags[key])
                     break
             for key in ("album", "TALB", "\xa9alb"):
                 if key in tags:
-                    info["album"] = _first(tags[key])
+                    v2["album"] = _first(tags[key])
                     break
         except Exception:
             pass
+
+    # MP3s often keep a correct (GBK) ID3v1 tag next to a broken ID3v2 one.
+    v1 = _read_id3v1(path) if path.suffix.lower() == ".mp3" else None
+
+    info["title"] = _pick_text(v2["title"], v1["title"] if v1 else None) or path.stem
+    info["artist"] = _pick_text(v2["artist"], v1["artist"] if v1 else None)
+    info["album"] = _pick_text(v2["album"], v1["album"] if v1 else None)
 
     cover = _extract_cover(audio, tid)
     return info, cover
@@ -338,7 +416,7 @@ def scan(progress=None) -> list[dict]:
 
 def _cache_signature() -> dict:
     return {
-        "schema": 2,
+        "schema": 3,
         "roots": [str(p) for p in config.media_dirs()],
         "audio_extensions": sorted(config.AUDIO_EXTS),
         "video_extensions": sorted(config.VIDEO_EXTS),

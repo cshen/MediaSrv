@@ -196,6 +196,15 @@ access interactively, so opening them can block indefinitely. Options:
   `<project>/.venv/bin/python` in System Settings → Privacy & Security, or
 - Run as a **LaunchAgent** instead (it inherits your user's permissions).
 
+### Garbled / gibberish Chinese (or other CJK) tags
+
+Old MP3 tags often store UTF-8 or GBK bytes but label them Latin-1, so titles
+show up like `ÐíÃÀ¾²` or `å¤©ç¢`. The scanner repairs these (recovers the raw
+bytes and re-decodes as UTF-8/GBK/Big5) and falls back to the ID3v1 tag when
+the ID3v2 field is lossy. Characters that were already replaced with `?` inside
+the file's tag cannot be recovered. Changing/upgrading this automatically
+invalidates the library cache, so just restart and it re-reads the tags.
+
 ### Logs
 
 The service logs go to `~/Library/Logs/MediaSrv.log`. Raise the level with
