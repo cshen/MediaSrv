@@ -137,6 +137,8 @@ Notes:
   **resumable** (segmented; tune with `segment_seconds`); if a file's duration
   can't be determined, it falls back to a single-pass encode.
 - Default `video_extensions` is `[".mp4", ".m4v", ".mov", ".mkv", ".webm"]`.
+- Check the cache size any time with **`./doctor.sh`** (reports the configured
+  and default `transcoded/` folders and warns if any exceeds 20 GB).
 - Disable/tune it in `config.toml` under `[transcode]`.
 
 ## Connect from the iPad
