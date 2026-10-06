@@ -11,6 +11,11 @@
   --radius: 18px;
   --sidebar-w: 340px;
   --shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+  /* Latin = San Francisco, CJK = Kai (楷体); the browser falls through
+     per-glyph, so English uses SF and Chinese uses Kai. */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+             "Kaiti SC", "Kaiti TC", "STKaiti", "BiauKai", "KaiTi",
+             "Helvetica Neue", Arial, sans-serif;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -20,9 +25,12 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-ui);
   overflow: hidden;
 }
+
+input, button, textarea, select { font-family: inherit; }
+.icon svg text { font-family: var(--font-ui); font-weight: 700; }
 
 .backdrop {
   position: fixed;
